@@ -254,6 +254,7 @@ class COCODetection(data.Dataset):
             pickle.dump(coco_eval, fid, pickle.HIGHEST_PROTOCOL)
         print('Wrote COCO eval results to: {}'.format(eval_file))
 
+
     def _coco_results_one_category(self, boxes, cat_id):
         results = []
         for im_ind, index in enumerate(self.image_indexes):

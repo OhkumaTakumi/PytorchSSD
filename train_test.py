@@ -20,6 +20,7 @@ from layers.modules import MultiBoxLoss
 from utils.nms_wrapper import nms
 from utils.timer import Timer
 
+from matplotlib import  pyplot as plt
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -37,7 +38,7 @@ parser.add_argument(
     '--basenet', default='weights/vgg16_reducedfc.pth', help='pretrained base model')
 parser.add_argument('--jaccard_threshold', default=0.5,
                     type=float, help='Min Jaccard index for matching')
-parser.add_argument('-b', '--batch_size', default=32,
+parser.add_argument('-b', '--batch_size', default=8,
                     type=int, help='Batch size for training')
 parser.add_argument('--num_workers', default=4,
                     type=int, help='Number of workers used in dataloading')
@@ -45,18 +46,18 @@ parser.add_argument('--cuda', default=True,
                     type=bool, help='Use cuda to train model')
 parser.add_argument('--ngpu', default=2, type=int, help='gpus')
 parser.add_argument('--lr', '--learning-rate',
-                    default=4e-5, type=float, help='initial learning rate')
+                    default=5e-4, type=float, help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 
 parser.add_argument('--resume_net', default=False, help='resume net for retraining')
 parser.add_argument('--resume_epoch', default=0,
                     type=int, help='resume iter for retraining')
 
-parser.add_argument('-max', '--max_epoch', default=300,
+parser.add_argument('-max', '--max_epoch', default=60,
                     type=int, help='max epoch for retraining')
 parser.add_argument('--weight_decay', default=5e-4,
                     type=float, help='Weight decay for SGD')
-parser.add_argument('-we', '--warm_epoch', default=1,
+parser.add_argument('-we', '--warm_epoch', default=3,
                     type=int, help='max epoch for retraining')
 parser.add_argument('--gamma', default=0.1,
                     type=float, help='Gamma update for SGD')
@@ -65,10 +66,10 @@ parser.add_argument('--log_iters', default=True,
 parser.add_argument('--save_folder', default='weights/',
                     help='Location to save checkpoint models')
 parser.add_argument('--date', default='1213')
-parser.add_argument('--save_frequency', default=10)
+parser.add_argument('--save_frequency', default=1)
 parser.add_argument('--retest', default=False, type=bool,
                     help='test cache results')
-parser.add_argument('--test_frequency', default=10)
+parser.add_argument('--test_frequency', default=1)
 parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False,
                     help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
@@ -222,7 +223,8 @@ def train():
     max_iter = args.max_epoch * epoch_size
 
     stepvalues_VOC = (150 * epoch_size, 200 * epoch_size, 250 * epoch_size)
-    stepvalues_COCO = (90 * epoch_size, 120 * epoch_size, 140 * epoch_size)
+    #stepvalues_COCO = (90 * epoch_size, 120 * epoch_size, 140 * epoch_size)
+    stepvalues_COCO = (40 * epoch_size, 50 * epoch_size, 60 * epoch_size)
     stepvalues = (stepvalues_VOC, stepvalues_COCO)[args.dataset == 'COCO']
     print('Training', args.version, 'on', train_dataset.name)
     step_index = 0
@@ -258,6 +260,20 @@ def train():
     batch_iterator = None
     mean_loss_c = 0
     mean_loss_l = 0
+
+    closs_list=[]
+    lloss_list=[]
+    loss_list=[]
+    itra_list=[]
+    # setting of graph
+    plt.ion()
+    fig = plt.figure(figsize=(10, 6))
+    plt.title('Simple Curve Graph')  ## グラフタイトル（必須ではない）
+    plt.xlabel('iteration')  ## x軸ラベル（必須ではない）
+    plt.ylabel('loss')  ## y軸ラベル（必須ではない）
+    plt.ylim(0, 25)  ## y軸範囲固定（必須ではない）
+    plt.grid()
+
     for iteration in range(start_iter, max_iter + 10):
         if (iteration % epoch_size == 0):
             # create batch iterator
@@ -282,7 +298,7 @@ def train():
                     log_file.write('mAP:\n' + mAP + '\n')
                 else:
                     test_net(test_save_dir, net, detector, args.cuda, testset,
-                             BaseTransform(net.module.size, rgb_means, rgb_std, (2, 0, 1)),
+                             BaseTransform(net.size, rgb_means, rgb_std, (2, 0, 1)),
                              top_k, thresh=0.01)
 
                 net.train()
@@ -327,6 +343,17 @@ def train():
         loss.backward()
         optimizer.step()
         load_t1 = time.time()
+        if iteration % 100 == 0 and iteration != 0:
+            closs_list.append(mean_loss_c/10)
+            lloss_list.append(mean_loss_l/10)
+            loss_list.append(mean_loss_c/10 + mean_loss_l/10)
+            itra_list.append((iteration))
+            # 描画領域
+            plt.plot(itra_list, closs_list, color='blue')
+            plt.plot(itra_list, lloss_list, color='green')
+            plt.plot(itra_list, loss_list, color='red')
+            plt.draw()
+            plt.pause(0.001)
         if iteration % 10 == 0:
             print('Epoch:' + repr(epoch) + ' || epochiter: ' + repr(iteration % epoch_size) + '/' + repr(epoch_size)
                   + '|| Totel iter ' +
@@ -345,6 +372,7 @@ def train():
             if args.visdom and args.send_images_to_visdom:
                 random_batch_index = np.random.randint(images.size(0))
                 viz.image(images.data[random_batch_index].cpu().numpy())
+
     log_file.close()
     torch.save(net.state_dict(), os.path.join(save_folder,
                                               'Final_' + args.version + '_' + args.dataset + '.pth'))
