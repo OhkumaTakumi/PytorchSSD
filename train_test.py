@@ -28,8 +28,7 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(
     description='Receptive Field Block Net Training')
-parser.add_argument('-v', '--version', default='SSD_vgg',
-                    help='RFB_vgg ,RFB_E_vgg RFB_mobile SSD_vgg version.')
+
 parser.add_argument('-s', '--size', default='512',
                     help='300 or 512 input size.')
 parser.add_argument('-d', '--dataset', default='COCO',
@@ -44,7 +43,7 @@ parser.add_argument('--num_workers', default=4,
                     type=int, help='Number of workers used in dataloading')
 parser.add_argument('--cuda', default=True,
                     type=bool, help='Use cuda to train model')
-parser.add_argument('--ngpu', default=2, type=int, help='gpus')
+parser.add_argument('--ngpu', default=1, type=int, help='gpus')
 parser.add_argument('--lr', '--learning-rate',
                     default=5e-4, type=float, help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
@@ -52,7 +51,8 @@ parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 parser.add_argument('--resume_net', default=False, help='resume net for retraining')
 parser.add_argument('--resume_epoch', default=0,
                     type=int, help='resume iter for retraining')
-
+parser.add_argument('-v', '--version', default='SSD_vgg',
+                    help='RFB_vgg ,RFB_E_vgg RFB_mobile SSD_vgg version.')
 parser.add_argument('-max', '--max_epoch', default=60,
                     type=int, help='max epoch for retraining')
 parser.add_argument('--weight_decay', default=5e-4,
@@ -66,14 +66,19 @@ parser.add_argument('--log_iters', default=True,
 parser.add_argument('--save_folder', default='weights/',
                     help='Location to save checkpoint models')
 parser.add_argument('--date', default='1213')
-parser.add_argument('--save_frequency', default=1)
+parser.add_argument('--save_frequency', default=10)
 parser.add_argument('--retest', default=False, type=bool,
                     help='test cache results')
 parser.add_argument('--test_frequency', default=1)
 parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False,
                     help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
+parser.add_argument('--classes', default='all',
+                    help='all or youtube_bb')
+parser.add_argument('--box_num', default=1000000000,
+                    help='max number of bounding boxes of each classes')
 args = parser.parse_args()
+
 
 save_folder = os.path.join(args.save_folder, args.version + '_' + args.size, args.date)
 if not os.path.exists(save_folder):
@@ -115,6 +120,9 @@ elif 'mobile' in args.version:
 
 p = (0.6, 0.2)[args.version == 'RFB_mobile']
 num_classes = (21, 81)[args.dataset == 'COCO']
+if args.classes == "youtube_bb" and args.dataset == 'COCO':
+    num_classes = 24
+
 batch_size = args.batch_size
 weight_decay = 0.0005
 gamma = 0.1
@@ -204,10 +212,17 @@ if args.dataset == 'VOC':
     train_dataset = VOCDetection(VOCroot, train_sets, preproc(
         img_dim, rgb_means, rgb_std, p), AnnotationTransform())
 elif args.dataset == 'COCO':
-    testset = COCODetection(
-        COCOroot, [('2017', 'val')], None)
-    train_dataset = COCODetection(COCOroot, train_sets, preproc(
-        img_dim, rgb_means, rgb_std, p))
+    if args.classes == 'youtube_bb':
+        testset = COCODetection(
+            COCOroot, [('2017', 'val')], None, classes='youtube_bb', box_num=args.box_num)
+        train_dataset = COCODetection(COCOroot, train_sets, preproc(
+            img_dim, rgb_means, rgb_std, p), classes='youtube_bb',  box_num=args.box_num)
+    else:
+        testset = COCODetection(
+            COCOroot, [('2017', 'val')], None)
+        train_dataset = COCODetection(COCOroot, train_sets, preproc(
+            img_dim, rgb_means, rgb_std, p))
+
 else:
     print('Only VOC and COCO are supported now!')
     exit()
@@ -244,6 +259,8 @@ def train():
         epoch_lot = viz.line(
             X=torch.zeros((1,)).cpu(),
             Y=torch.zeros((1, 3)).cpu(),
+
+
             opts=dict(
                 xlabel='Epoch',
                 ylabel='Loss',
@@ -397,9 +414,10 @@ def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image
         os.mkdir(save_folder)
     # dump predictions and assoc. ground truth to text file for now
     num_images = len(testset)
-    num_classes = (21, 81)[args.dataset == 'COCO']
+
     all_boxes = [[[] for _ in range(num_images)]
                  for _ in range(num_classes)]
+
 
     _t = {'im_detect': Timer(), 'misc': Timer()}
     det_file = os.path.join(save_folder, 'detections.pkl')
@@ -476,6 +494,9 @@ def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image
         return APs, mAP
     else:
         testset.evaluate_detections(all_boxes, save_folder)
+
+    with open('/home/takumi/research/PytorchSSD/weights/RFB_vgg_512/1213/ss_predict/detection_results.pkl', 'rb') as f:
+        data = pickle.load(f)
 
 
 if __name__ == '__main__':
