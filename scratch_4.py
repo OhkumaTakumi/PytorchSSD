@@ -37,3 +37,8 @@ print(data.stats)
 
 
 '''
+
+#with open("/home/takumi/research/PytorchSSD/result/1000_box.binaryfile", 'rb') as f:
+#    data = pickle.load(f)
+
+#print(data)

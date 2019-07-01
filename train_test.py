@@ -66,7 +66,7 @@ parser.add_argument('--log_iters', default=True,
 parser.add_argument('--save_folder', default='weights/',
                     help='Location to save checkpoint models')
 parser.add_argument('--date', default='1213')
-parser.add_argument('--save_frequency', default=10)
+parser.add_argument('--save_frequency', default=1)
 parser.add_argument('--retest', default=False, type=bool,
                     help='test cache results')
 parser.add_argument('--test_frequency', default=1)
@@ -75,10 +75,15 @@ parser.add_argument('--send_images_to_visdom', type=str2bool, default=False,
                     help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--classes', default='all',
                     help='all or youtube_bb')
-parser.add_argument('--box_num', default=1000000000,
-                    help='max number of bounding boxes of each classes')
+parser.add_argument('--box_num', default=100000000,
+                    help='max number of bounding boxes of each classes or "full" or default')
+parser.add_argument('--test_only', default=False,
+                    type=bool, help='Only test not train')
 args = parser.parse_args()
 
+path_result = "/home/takumi/research/PytorchSSD/result"
+with open(os.path.join(path_result, "result_{0}boxes.txt".format(args.box_num)), mode='w') as result_file:
+    result_file.write("result of the situation that the number of boxes of each classes are {0}\n\n".format(args.box_num))
 
 save_folder = os.path.join(args.save_folder, args.version + '_' + args.size, args.date)
 if not os.path.exists(save_folder):
@@ -121,7 +126,7 @@ elif 'mobile' in args.version:
 p = (0.6, 0.2)[args.version == 'RFB_mobile']
 num_classes = (21, 81)[args.dataset == 'COCO']
 if args.classes == "youtube_bb" and args.dataset == 'COCO':
-    num_classes = 24
+    num_classes = 23
 
 batch_size = args.batch_size
 weight_decay = 0.0005
@@ -173,6 +178,9 @@ else:
     # load resume network
     resume_net_path = os.path.join(save_folder, args.version + '_' + args.dataset + '_epoches_' + \
                                    str(args.resume_epoch) + '.pth')
+
+    resume_net_path = "/home/takumi/research/PytorchSSD/weights/RFB_vgg_512/1213/RFB_vgg_COCO_100000000_boxes_epoches_16.pth"
+
     print('Loading resume network', resume_net_path)
     state_dict = torch.load(resume_net_path)
     # create new OrderedDict that does not contain `module.`
@@ -214,7 +222,7 @@ if args.dataset == 'VOC':
 elif args.dataset == 'COCO':
     if args.classes == 'youtube_bb':
         testset = COCODetection(
-            COCOroot, [('2017', 'val')], None, classes='youtube_bb', box_num=args.box_num)
+            COCOroot, [('2017', 'val')], None, classes='youtube_bb')
         train_dataset = COCODetection(COCOroot, train_sets, preproc(
             img_dim, rgb_means, rgb_std, p), classes='youtube_bb',  box_num=args.box_num)
     else:
@@ -273,6 +281,23 @@ def train():
     else:
         start_iter = 0
 
+    if args.test_only:
+        net.eval()
+        top_k = (300, 200)[args.dataset == 'COCO']
+        if args.dataset == 'VOC':
+            APs, mAP = test_net(test_save_dir, net, detector, args.cuda, testset,
+                                BaseTransform(net.module.size, rgb_means, rgb_std, (2, 0, 1)),
+                                top_k, thresh=0.01, epoch=epoch)
+            APs = [str(num) for num in APs]
+            mAP = str(mAP)
+            log_file.write(str(iteration) + ' APs:\n' + '\n'.join(APs))
+            log_file.write('mAP:\n' + mAP + '\n')
+        else:
+            test_net(test_save_dir, net, detector, args.cuda, testset,
+                     BaseTransform(net.size, rgb_means, rgb_std, (2, 0, 1)),
+                     top_k, thresh=0.01, epoch=epoch)
+        return
+
     log_file = open(log_file_path, 'w')
     batch_iterator = None
     mean_loss_c = 0
@@ -293,22 +318,30 @@ def train():
 
     for iteration in range(start_iter, max_iter + 10):
         if (iteration % epoch_size == 0):
-            # create batch iterator
+            if epoch > 0:
+                with open(os.path.join(path_result, "result_{0}boxes.txt".format(args.box_num)),
+                          mode='a') as result_file:
+                    result_file.write("epoch : {0}\n".format(epoch))
+                    result_file.write("location loss   : {0}\n".format(closs_list[-1]))
+                    result_file.write("confidence loss : {0}\n".format(lloss_list[-1]))
+                    result_file.write("all loss        : {0}\n".format(loss_list[-1]))
+
+
             batch_iterator = iter(data.DataLoader(train_dataset, batch_size,
                                                   shuffle=True, num_workers=args.num_workers,
                                                   collate_fn=detection_collate))
             loc_loss = 0
             conf_loss = 0
             if epoch % args.save_frequency == 0 and epoch > 0:
-                torch.save(net.state_dict(), os.path.join(save_folder, args.version + '_' + args.dataset + '_epoches_' +
-                                                          repr(epoch) + '.pth'))
+                torch.save(net.state_dict(), os.path.join(save_folder, args.version + '_' + args.dataset +
+                                                          '_{0}_boxes'.format(args.box_num) + '_epoches_' + repr(epoch) + '.pth'))
             if epoch % args.test_frequency == 0 and epoch > 0:
                 net.eval()
                 top_k = (300, 200)[args.dataset == 'COCO']
                 if args.dataset == 'VOC':
                     APs, mAP = test_net(test_save_dir, net, detector, args.cuda, testset,
                                         BaseTransform(net.module.size, rgb_means, rgb_std, (2, 0, 1)),
-                                        top_k, thresh=0.01)
+                                        top_k, thresh=0.01, epoch=epoch)
                     APs = [str(num) for num in APs]
                     mAP = str(mAP)
                     log_file.write(str(iteration) + ' APs:\n' + '\n'.join(APs))
@@ -316,7 +349,7 @@ def train():
                 else:
                     test_net(test_save_dir, net, detector, args.cuda, testset,
                              BaseTransform(net.size, rgb_means, rgb_std, (2, 0, 1)),
-                             top_k, thresh=0.01)
+                             top_k, thresh=0.01, epoch=epoch)
 
                 net.train()
             epoch += 1
@@ -361,9 +394,9 @@ def train():
         optimizer.step()
         load_t1 = time.time()
         if iteration % 100 == 0 and iteration != 0:
-            closs_list.append(mean_loss_c/10)
-            lloss_list.append(mean_loss_l/10)
-            loss_list.append(mean_loss_c/10 + mean_loss_l/10)
+            closs_list.append(mean_loss_c.item()/10)
+            lloss_list.append(mean_loss_l.item()/10)
+            loss_list.append(mean_loss_c.item()/10 + mean_loss_l.item()/10)
             itra_list.append((iteration))
             # 描画領域
             plt.plot(itra_list, closs_list, color='blue')
@@ -371,6 +404,8 @@ def train():
             plt.plot(itra_list, loss_list, color='red')
             plt.draw()
             plt.pause(0.001)
+            loss_all=[closs_list, lloss_list, loss_list, itra_list]
+
         if iteration % 10 == 0:
             print('Epoch:' + repr(epoch) + ' || epochiter: ' + repr(iteration % epoch_size) + '/' + repr(epoch_size)
                   + '|| Totel iter ' +
@@ -386,6 +421,12 @@ def train():
 
             mean_loss_c = 0
             mean_loss_l = 0
+
+            #save loss
+            loss_all = [closs_list, lloss_list, loss_list]
+            with open("/home/takumi/research/PytorchSSD/result/{0}_box.binaryfile".format(args.box_num), "wb") as f:
+                pickle.dump(loss_all, f)
+
             if args.visdom and args.send_images_to_visdom:
                 random_batch_index = np.random.randint(images.size(0))
                 viz.image(images.data[random_batch_index].cpu().numpy())
@@ -409,7 +450,7 @@ def adjust_learning_rate(optimizer, gamma, epoch, step_index, iteration, epoch_s
     return lr
 
 
-def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image=300, thresh=0.005):
+def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image=300, thresh=0.005, epoch=0):
     if not os.path.exists(save_folder):
         os.mkdir(save_folder)
     # dump predictions and assoc. ground truth to text file for now
@@ -497,6 +538,34 @@ def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image
 
     with open('/home/takumi/research/PytorchSSD/weights/RFB_vgg_512/1213/ss_predict/detection_results.pkl', 'rb') as f:
         data = pickle.load(f)
+
+    with open(os.path.join(path_result, "result_{0}boxes.txt".format(args.box_num)), mode='a') as result_file:
+
+        result_file.write(
+            "Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = {0}\n".format(data.stats[0]))
+        result_file.write(
+            "Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = {0}\n".format(data.stats[1]))
+        result_file.write(
+            "Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = {0}\n".format(data.stats[2]))
+        result_file.write(
+            "Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = {0}\n".format(data.stats[3]))
+        result_file.write(
+            "Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = {0}\n".format(data.stats[4]))
+        result_file.write(
+            "Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = {0}\n".format(data.stats[5]))
+        result_file.write(
+            "Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=1   ] = {0}\n".format(data.stats[6]))
+        result_file.write(
+            "Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=10  ] = {0}\n".format(data.stats[7]))
+        result_file.write(
+            "Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = {0}\n".format(data.stats[8]))
+        result_file.write(
+            "Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = {0}\n".format(data.stats[9]))
+        result_file.write(
+            "Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = {0}\n".format(data.stats[10]))
+        result_file.write(
+            "Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = {0}\n".format(data.stats[11]))
+        result_file.write("\n\n")
 
 
 if __name__ == '__main__':

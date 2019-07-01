@@ -23,7 +23,7 @@ from utils.pycocotools.cocoeval import COCOeval
 import random
 
 
-classes_youtubebb = ['person', 'bird', 'bicycle', 'boat', 'bus', 'bear', 'cow', 'cat', 'giraffe', 'potted plant',
+classes_youtubebb = ['bird', 'bicycle', 'boat', 'bus', 'bear', 'cow', 'cat', 'giraffe', 'potted plant',
                      'horse', 'motorcycle', 'knife', 'airplane', 'skateboard', 'train', 'truck', 'zebra', 'toilet',
                      'dog', 'elephant', 'umbrella', 'none', 'car']
 
@@ -97,16 +97,15 @@ class COCODetection(data.Dataset):
                 indexes.extend(_COCO.getImgIds(catIds=cat["id"]))
             indexes = set(indexes)
             indexes = list(indexes)
-            random.seed(0)
+            random.seed(box_num)
             random.shuffle(indexes)
-
-            self.image_indexes = indexes
 
             if image_set.find('test') != -1:
                 print('test set will not load annotations!')
             else:
                 self.annotations.extend(self._load_coco_annotations(coco_name, indexes, _COCO, self.box_num))
 
+            self.image_indexes = self.indexes_limit
             self.ids.extend([self.image_path_from_index(data_name, index) for index in self.indexes_limit])
 
     def image_path_from_index(self, name, index):
@@ -136,7 +135,7 @@ class COCODetection(data.Dataset):
                             prefix + '_' + name + '.json')
 
     def _load_coco_annotations(self, coco_name, indexes, _COCO, box_num):
-        if box_num > 10000:
+        if box_num > 100000000000000000000:
             cache_file = os.path.join(self.cache_path, coco_name + '_gt_roidb.pkl')
             if not os.path.exists(self.cache_path):
                 os.makedirs(self.cache_path)
@@ -307,6 +306,11 @@ class COCODetection(data.Dataset):
         ann_type = 'bbox'
         coco_dt = self._COCO.loadRes(res_file)
         coco_eval = COCOeval(self._COCO, coco_dt)
+        if self.classes == "youtube_bb":
+            coco_eval.params.setDetParams()
+            coco_eval.params.catIds = self._COCO.getCatIds(catNms=classes_youtubebb)
+            coco_eval.params.imgIds = self.image_indexes
+            print(len(coco_eval.params.imgIds))
         coco_eval.params.useSegm = (ann_type == 'segm')
         coco_eval.evaluate()
         coco_eval.accumulate()
