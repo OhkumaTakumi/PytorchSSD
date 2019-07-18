@@ -27,6 +27,8 @@ classes_youtubebb = ['bird', 'bicycle', 'boat', 'bus', 'bear', 'cow', 'cat', 'gi
                      'horse', 'motorcycle', 'knife', 'airplane', 'skateboard', 'train', 'truck', 'zebra', 'toilet',
                      'dog', 'elephant', 'umbrella', 'none', 'car']
 
+classes_youtubebb_sub = ['bicycle', 'bus', 'motorcycle', 'truck', 'car']
+
 class COCODetection(data.Dataset):
     """VOC Detection Dataset Object
 
@@ -74,6 +76,8 @@ class COCODetection(data.Dataset):
 
             if self.classes == "youtube_bb":
                 cats = _COCO.loadCats(_COCO.getCatIds(catNms=classes_youtubebb))
+            elif self.classes == "youtube_bb_sub":
+                cats = _COCO.loadCats(_COCO.getCatIds(catNms=classes_youtubebb_sub))
             else:
                 cats = _COCO.loadCats(_COCO.getCatIds())
 
@@ -86,6 +90,9 @@ class COCODetection(data.Dataset):
             if self.classes == "youtube_bb":
                 self._class_to_coco_cat_id = dict(zip([c['name'] for c in cats],
                                                       _COCO.getCatIds(catNms=classes_youtubebb)))
+            if self.classes == "youtube_bb_sub":
+                self._class_to_coco_cat_id = dict(zip([c['name'] for c in cats],
+                                                      _COCO.getCatIds(catNms=classes_youtubebb_sub)))
             else:
                 self._class_to_coco_cat_id = dict(zip([c['name'] for c in cats],
                                                       _COCO.getCatIds()))
@@ -152,8 +159,10 @@ class COCODetection(data.Dataset):
             print('wrote gt roidb to {}'.format(cache_file))
             return gt_roidb
         else:
-
-            catIds = _COCO.getCatIds(catNms=classes_youtubebb)
+            if self.classes == "youtube_bb":
+                catIds = _COCO.getCatIds(catNms=classes_youtubebb)
+            elif self.classes == "youtube_bb_sub":
+                catIds = _COCO.getCatIds(catNms=classes_youtubebb_sub)
             box_cat_num = dict()
             for cat in catIds:
                 box_cat_num[cat] = 0
@@ -171,8 +180,13 @@ class COCODetection(data.Dataset):
                     for cat in catIds:
                         box_cat_num[cat] += len(_COCO.getAnnIds(imgIds=indexes[i], catIds=cat))
                     self.indexes_limit.append(indexes[i])
-            gt_roidb = [self._annotation_from_index(index, _COCO,  catIds=_COCO.getCatIds(catNms=classes_youtubebb))
+            if self.classes == "youtube_bb":
+                gt_roidb = [self._annotation_from_index(index, _COCO,  catIds=_COCO.getCatIds(catNms=classes_youtubebb))
                         for index in self.indexes_limit]
+            elif self.classes == "youtube_bb_sub":
+                gt_roidb = [self._annotation_from_index(index, _COCO,  catIds=_COCO.getCatIds(catNms=classes_youtubebb_sub))
+                        for index in self.indexes_limit]
+
             return gt_roidb
 
     def _annotation_from_index(self, index, _COCO, catIds=None):
@@ -213,6 +227,7 @@ class COCODetection(data.Dataset):
         coco_cat_id_to_class_ind = dict([(self._class_to_coco_cat_id[cls],
                                           self._class_to_ind[cls])
                                          for cls in self._classes[1:]])
+        print(coco_cat_id_to_class_ind)
 
         for ix, obj in enumerate(objs):
             cls = coco_cat_id_to_class_ind[obj['category_id']]
@@ -226,6 +241,7 @@ class COCODetection(data.Dataset):
         target = self.annotations[index]
         img = cv2.imread(img_id, cv2.IMREAD_COLOR)
         height, width, _ = img.shape
+
 
         if self.target_transform is not None:
             target = self.target_transform(target)
@@ -297,7 +313,7 @@ class COCODetection(data.Dataset):
             # minus 1 because of __background__
             precision = coco_eval.eval['precision'][ind_lo:(ind_hi + 1), :, cls_ind - 1, 0, 2]
             ap = np.mean(precision[precision > -1])
-            print('{:.1f}'.format(100 * ap))
+            print('{}: {:.1f}'.format(cls, 100 * ap))
 
         print('~~~~ Summary metrics ~~~~')
         coco_eval.summarize()
@@ -309,6 +325,11 @@ class COCODetection(data.Dataset):
         if self.classes == "youtube_bb":
             coco_eval.params.setDetParams()
             coco_eval.params.catIds = self._COCO.getCatIds(catNms=classes_youtubebb)
+            coco_eval.params.imgIds = self.image_indexes
+            print(len(coco_eval.params.imgIds))
+        elif self.classes == "youtube_bb_sub":
+            coco_eval.params.setDetParams()
+            coco_eval.params.catIds = self._COCO.getCatIds(catNms=classes_youtubebb_sub)
             coco_eval.params.imgIds = self.image_indexes
             print(len(coco_eval.params.imgIds))
         coco_eval.params.useSegm = (ann_type == 'segm')

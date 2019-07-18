@@ -21,6 +21,8 @@ from utils.nms_wrapper import nms
 from utils.timer import Timer
 
 from matplotlib import  pyplot as plt
+from Videoframe import Videoframes
+from pseudoframe import Pseudoframes
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -32,20 +34,20 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-s', '--size', default='512',
                     help='300 or 512 input size.')
 parser.add_argument('-d', '--dataset', default='COCO',
-                    help='VOC or COCO dataset')
+                    help='VOC or COCO dataset or youtube')
 parser.add_argument(
     '--basenet', default='weights/vgg16_reducedfc.pth', help='pretrained base model')
 parser.add_argument('--jaccard_threshold', default=0.5,
                     type=float, help='Min Jaccard index for matching')
-parser.add_argument('-b', '--batch_size', default=8,
+parser.add_argument('-b', '--batch_size', default=16,
                     type=int, help='Batch size for training')
 parser.add_argument('--num_workers', default=4,
                     type=int, help='Number of workers used in dataloading')
 parser.add_argument('--cuda', default=True,
                     type=bool, help='Use cuda to train model')
-parser.add_argument('--ngpu', default=1, type=int, help='gpus')
+parser.add_argument('--ngpu', default=2, type=int, help='gpus')
 parser.add_argument('--lr', '--learning-rate',
-                    default=5e-4, type=float, help='initial learning rate')
+                    default=1e-3, type=float, help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 
 parser.add_argument('--resume_net', default=False, help='resume net for retraining')
@@ -53,7 +55,7 @@ parser.add_argument('--resume_epoch', default=0,
                     type=int, help='resume iter for retraining')
 parser.add_argument('-v', '--version', default='SSD_vgg',
                     help='RFB_vgg ,RFB_E_vgg RFB_mobile SSD_vgg version.')
-parser.add_argument('-max', '--max_epoch', default=60,
+parser.add_argument('-max', '--max_epoch', default=300,
                     type=int, help='max epoch for retraining')
 parser.add_argument('--weight_decay', default=5e-4,
                     type=float, help='Weight decay for SGD')
@@ -66,24 +68,29 @@ parser.add_argument('--log_iters', default=True,
 parser.add_argument('--save_folder', default='weights/',
                     help='Location to save checkpoint models')
 parser.add_argument('--date', default='1213')
-parser.add_argument('--save_frequency', default=1)
+parser.add_argument('--save_frequency', default=10)
 parser.add_argument('--retest', default=False, type=bool,
                     help='test cache results')
-parser.add_argument('--test_frequency', default=1)
+parser.add_argument('--test_frequency', default=10)
 parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False,
                     help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--classes', default='all',
-                    help='all or youtube_bb')
+                    help='all or youtube_bb or youtube_bb_sub')
 parser.add_argument('--box_num', default=100000000,
                     help='max number of bounding boxes of each classes or "full" or default')
 parser.add_argument('--test_only', default=False,
                     type=bool, help='Only test not train')
+parser.add_argument('--test_eval', default=True,
+                    type=bool, help='Evaluating on test data')
+parser.add_argument('--pseudo', default=False,
+                    type=bool, help='Use pseudo labels from video')
 args = parser.parse_args()
 
 path_result = "/home/takumi/research/PytorchSSD/result"
-with open(os.path.join(path_result, "result_{0}boxes.txt".format(args.box_num)), mode='w') as result_file:
-    result_file.write("result of the situation that the number of boxes of each classes are {0}\n\n".format(args.box_num))
+if not args.test_only:
+    with open(os.path.join(path_result, "result_{0}boxes.txt".format(args.box_num)), mode='w') as result_file:
+        result_file.write("result of the situation that the number of boxes of each classes are {0}\n\n".format(args.box_num))
 
 save_folder = os.path.join(args.save_folder, args.version + '_' + args.size, args.date)
 if not os.path.exists(save_folder):
@@ -125,8 +132,11 @@ elif 'mobile' in args.version:
 
 p = (0.6, 0.2)[args.version == 'RFB_mobile']
 num_classes = (21, 81)[args.dataset == 'COCO']
-if args.classes == "youtube_bb" and args.dataset == 'COCO':
+if args.classes == "youtube_bb" and (args.dataset == 'COCO' or args.dataset == 'youtube'):
     num_classes = 23
+if args.classes == "youtube_bb_sub" and (args.dataset == 'COCO' or args.dataset == 'youtube'):
+    num_classes = 6
+
 
 batch_size = args.batch_size
 weight_decay = 0.0005
@@ -179,7 +189,7 @@ else:
     resume_net_path = os.path.join(save_folder, args.version + '_' + args.dataset + '_epoches_' + \
                                    str(args.resume_epoch) + '.pth')
 
-    resume_net_path = "/home/takumi/research/PytorchSSD/weights/RFB_vgg_512/1213/RFB_vgg_COCO_100000000_boxes_epoches_16.pth"
+    resume_net_path = "/home/takumi/important_result/RFB_SSD/1000_Final_RFB_vgg_COCO.pth"
 
     print('Loading resume network', resume_net_path)
     state_dict = torch.load(resume_net_path)
@@ -196,8 +206,11 @@ else:
         new_state_dict[name] = v
     net.load_state_dict(new_state_dict)
 
+net_size_copy = net.size
 if args.ngpu > 1:
     net = torch.nn.DataParallel(net, device_ids=list(range(args.ngpu)))
+
+
 
 if args.cuda:
     net.cuda()
@@ -213,41 +226,73 @@ criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False)
 priorbox = PriorBox(cfg)
 priors = Variable(priorbox.forward(), volatile=True)
 # dataset
-print('Loading Dataset...')
+
 if args.dataset == 'VOC':
+    print('Loading Dataset...')
     testset = VOCDetection(
         VOCroot, [('2007', 'test')], None, AnnotationTransform())
     train_dataset = VOCDetection(VOCroot, train_sets, preproc(
         img_dim, rgb_means, rgb_std, p), AnnotationTransform())
 elif args.dataset == 'COCO':
+    print('Loading Dataset...')
     if args.classes == 'youtube_bb':
         testset = COCODetection(
             COCOroot, [('2017', 'val')], None, classes='youtube_bb')
         train_dataset = COCODetection(COCOroot, train_sets, preproc(
             img_dim, rgb_means, rgb_std, p), classes='youtube_bb',  box_num=args.box_num)
+    elif args.classes == 'youtube_bb_sub':
+        testset = COCODetection(
+            COCOroot, [('2017', 'val')], None, classes='youtube_bb_sub')
+        train_dataset = COCODetection(COCOroot, train_sets, preproc(
+            img_dim, rgb_means, rgb_std, p), classes='youtube_bb_sub',  box_num=args.box_num)
     else:
         testset = COCODetection(
             COCOroot, [('2017', 'val')], None)
         train_dataset = COCODetection(COCOroot, train_sets, preproc(
             img_dim, rgb_means, rgb_std, p))
-
-else:
-    print('Only VOC and COCO are supported now!')
+elif args.dataset != 'youtube':
+    print('Only VOC ,COCO and youtube are supported now!')
     exit()
 
 
 def train():
+
+    epoch = 0
+
+    if args.test_only:
+        net.eval()
+        top_k = (300, 200)[args.dataset == 'COCO']
+        if args.dataset == 'VOC':
+            APs, mAP = test_net(test_save_dir, net, detector, args.cuda, testset,
+                                BaseTransform(net.module.size, rgb_means, rgb_std, (2, 0, 1)),
+                                top_k, thresh=0.01, epoch=epoch)
+            APs = [str(num) for num in APs]
+            mAP = str(mAP)
+            log_file.write(str(iteration) + ' APs:\n' + '\n'.join(APs))
+            log_file.write('mAP:\n' + mAP + '\n')
+        elif args.dataset == "COCO" or args.dataset == "youtube":
+            test_net(test_save_dir, net, detector, args.cuda, testset,
+                     BaseTransform(net_size_copy, rgb_means, rgb_std, (2, 0, 1)),
+                     top_k, thresh=0.01, epoch=epoch)
+        return
+
     net.train()
     # loss counters
-    epoch = 0
+
     if args.resume_net:
         epoch = 0 + args.resume_epoch
     epoch_size = len(train_dataset) // args.batch_size
-    max_iter = args.max_epoch * epoch_size
+
+    #epoch_based
+    #max_iter = args.max_epoch * epoch_size
+
+    #iteration_based
+    max_iter = 100000
+
 
     stepvalues_VOC = (150 * epoch_size, 200 * epoch_size, 250 * epoch_size)
     #stepvalues_COCO = (90 * epoch_size, 120 * epoch_size, 140 * epoch_size)
-    stepvalues_COCO = (40 * epoch_size, 50 * epoch_size, 60 * epoch_size)
+    stepvalues_COCO = (60000, 75000, 90000)
     stepvalues = (stepvalues_VOC, stepvalues_COCO)[args.dataset == 'COCO']
     print('Training', args.version, 'on', train_dataset.name)
     step_index = 0
@@ -281,22 +326,7 @@ def train():
     else:
         start_iter = 0
 
-    if args.test_only:
-        net.eval()
-        top_k = (300, 200)[args.dataset == 'COCO']
-        if args.dataset == 'VOC':
-            APs, mAP = test_net(test_save_dir, net, detector, args.cuda, testset,
-                                BaseTransform(net.module.size, rgb_means, rgb_std, (2, 0, 1)),
-                                top_k, thresh=0.01, epoch=epoch)
-            APs = [str(num) for num in APs]
-            mAP = str(mAP)
-            log_file.write(str(iteration) + ' APs:\n' + '\n'.join(APs))
-            log_file.write('mAP:\n' + mAP + '\n')
-        else:
-            test_net(test_save_dir, net, detector, args.cuda, testset,
-                     BaseTransform(net.size, rgb_means, rgb_std, (2, 0, 1)),
-                     top_k, thresh=0.01, epoch=epoch)
-        return
+
 
     log_file = open(log_file_path, 'w')
     batch_iterator = None
@@ -316,20 +346,24 @@ def train():
     plt.ylim(0, 25)  ## y軸範囲固定（必須ではない）
     plt.grid()
 
-    for iteration in range(start_iter, max_iter + 10):
-        if (iteration % epoch_size == 0):
-            if epoch > 0:
-                with open(os.path.join(path_result, "result_{0}boxes.txt".format(args.box_num)),
-                          mode='a') as result_file:
-                    result_file.write("epoch : {0}\n".format(epoch))
-                    result_file.write("location loss   : {0}\n".format(closs_list[-1]))
-                    result_file.write("confidence loss : {0}\n".format(lloss_list[-1]))
-                    result_file.write("all loss        : {0}\n".format(loss_list[-1]))
+    #epoch_size = len(pseudo_dataset) // args.batch_size
 
+    for iteration in range(start_iter, max_iter + 10):
+        if iteration > 0 and iteration % 1000 == 0:
+            with open(os.path.join(path_result, "{0}boxes_result.txt".format(args.box_num)),
+                      mode='a') as result_file:
+                result_file.write("iteration : {0}\n".format(iteration))
+                result_file.write("location loss   : {0}\n".format(closs_list[-1]))
+                result_file.write("confidence loss : {0}\n".format(lloss_list[-1]))
+                result_file.write("all loss        : {0}\n".format(loss_list[-1]))
+        if (iteration % epoch_size == 0):
 
             batch_iterator = iter(data.DataLoader(train_dataset, batch_size,
                                                   shuffle=True, num_workers=args.num_workers,
                                                   collate_fn=detection_collate))
+            #pseudo_iterator = iter(data.DataLoader(pseudo_dataset, batch_size,
+            #                                      shuffle=True, num_workers=args.num_workers,
+            #                                      collate_fn=detection_collate))
             loc_loss = 0
             conf_loss = 0
             if epoch % args.save_frequency == 0 and epoch > 0:
@@ -348,7 +382,7 @@ def train():
                     log_file.write('mAP:\n' + mAP + '\n')
                 else:
                     test_net(test_save_dir, net, detector, args.cuda, testset,
-                             BaseTransform(net.size, rgb_means, rgb_std, (2, 0, 1)),
+                             BaseTransform(net_size_copy, rgb_means, rgb_std, (2, 0, 1)),
                              top_k, thresh=0.01, epoch=epoch)
 
                 net.train()
@@ -369,6 +403,7 @@ def train():
 
         # load train data
         images, targets = next(batch_iterator)
+
 
         # print(np.sum([torch.sum(anno[:,-1] == 2) for anno in targets]))
 
@@ -433,7 +468,7 @@ def train():
 
     log_file.close()
     torch.save(net.state_dict(), os.path.join(save_folder,
-                                              'Final_' + args.version + '_' + args.dataset + '.pth'))
+                                              '{0}'.format(args.box_num) + 'Final_' + args.version + '_' + args.dataset + '.pth'))
 
 
 def adjust_learning_rate(optimizer, gamma, epoch, step_index, iteration, epoch_size):
@@ -462,6 +497,11 @@ def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image
 
     _t = {'im_detect': Timer(), 'misc': Timer()}
     det_file = os.path.join(save_folder, 'detections.pkl')
+    path_file = os.path.join(save_folder, 'img_path_coco2017_val.pkl')
+    if epoch == args.max_epoch or args.test_only:
+        det_file = os.path.join(save_folder, 'detections{0}.pkl'.format(args.box_num))
+    if args.dataset == "youtube":
+        det_file = path1 + path_result + '.pkl'
 
     if args.retest:
         f = open(det_file, 'rb')
@@ -470,7 +510,11 @@ def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image
         testset.evaluate_detections(all_boxes, save_folder)
         return
 
+    img_path = []
+
     for i in range(num_images):
+        if args.dataset != "youtube":
+            img_path.append([i, testset.ids[i]])
         img = testset.pull_image(i)
         x = Variable(transform(img).unsqueeze(0), volatile=True)
         if cuda:
@@ -508,6 +552,7 @@ def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image
 
             keep = nms(c_dets, 0.45, force_cpu=cpu)
             keep = keep[:50]
+
             c_dets = c_dets[keep, :]
             all_boxes[j][i] = c_dets
         if max_per_image > 0:
@@ -529,6 +574,16 @@ def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image
     with open(det_file, 'wb') as f:
         pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
 
+    if args.dataset == "youtube":
+        return
+
+    #save img path
+    with open(path_file, 'wb') as f:
+        pickle.dump(img_path, f, pickle.HIGHEST_PROTOCOL)
+
+    if not args.test_eval:
+        return
+
     print('Evaluating detections')
     if args.dataset == 'VOC':
         APs, mAP = testset.evaluate_detections(all_boxes, save_folder)
@@ -539,7 +594,10 @@ def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image
     with open('/home/takumi/research/PytorchSSD/weights/RFB_vgg_512/1213/ss_predict/detection_results.pkl', 'rb') as f:
         data = pickle.load(f)
 
-    with open(os.path.join(path_result, "result_{0}boxes.txt".format(args.box_num)), mode='a') as result_file:
+    if args.test_only:
+        return
+
+    with open(os.path.join(path_result, "{0}boxes_result.txt".format(args.box_num)), mode='a') as result_file:
 
         result_file.write(
             "Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = {0}\n".format(data.stats[0]))
@@ -569,4 +627,30 @@ def test_net(save_folder, net, detector, cuda, testset, transform, max_per_image
 
 
 if __name__ == '__main__':
-    train()
+    if args.dataset != "youtube":
+        if args.pseudo:
+            pseudo_dataset = Pseudoframes(preproc=preproc(img_dim, rgb_means, rgb_std, p))
+        train()
+    else:
+        for i in range(200, 50000):
+            for class_num in range(1,24):
+                if class_num == 22:
+                    continue
+                path1 = "/home/takumi/data/YouTube-BB"
+                path_classfolder = "/home/takumi/data/YouTube-BB/videos/{0}".format(class_num)
+
+                video_list = os.listdir(path_classfolder)
+                if len(video_list) > i:
+                    video = video_list[i]
+
+                    path_video = "/videos/{0}/".format(class_num) + video
+                    path_result = "/detection_result/{0}/".format(class_num) + video[:-4]
+
+                    print(i, class_num)
+
+                    testset = Videoframes(path1 + path_video)
+                    train()
+
+
+
+
