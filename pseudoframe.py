@@ -10,14 +10,17 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 
-pseudo_label_path = "/home/takumi/data/YouTube-BB/pseudo/pseudo_label.json"
+pseudo_label_path0 = "/home/takumi/data/YouTube-BB/pseudo/pseudo_label0.json"
+pseudo_label_path1 = "/home/takumi/data/YouTube-BB/pseudo/pseudo_label1.json"
 
 class Pseudoframes(data.Dataset):
     def __init__(self, class_list=None, preproc=None, target_transform=None):
         self.preproc = preproc
         self.target_transform = target_transform
-        with open(pseudo_label_path, 'r') as f:
+        with open(pseudo_label_path0, 'r') as f:
             self.pseudo_label = json.load(f)
+        with open(pseudo_label_path1, 'r') as f:
+            self.pseudo_label.update(json.load(f))
 
         self.img_path = []
         self.annotations = []
@@ -42,13 +45,19 @@ class Pseudoframes(data.Dataset):
         height, width, _ = img.shape
 
         target = np.array(target)
-
+        #print(target, img.shape,  index, img_id)
 
         if self.target_transform is not None:
             target = self.target_transform(target)
 
         if self.preproc is not None:
             img, target = self.preproc(img, target)
+
+        img2 = img
+        img2 = img2.numpy()
+        #print(img[0][0][0])
+
+        #print(3, type(target), target)
 
             # target = self.target_transform(target, width, height)
         # print(target.shape)

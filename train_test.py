@@ -39,13 +39,13 @@ parser.add_argument(
     '--basenet', default='weights/vgg16_reducedfc.pth', help='pretrained base model')
 parser.add_argument('--jaccard_threshold', default=0.5,
                     type=float, help='Min Jaccard index for matching')
-parser.add_argument('-b', '--batch_size', default=16,
+parser.add_argument('-b', '--batch_size', default=2,
                     type=int, help='Batch size for training')
 parser.add_argument('--num_workers', default=4,
                     type=int, help='Number of workers used in dataloading')
 parser.add_argument('--cuda', default=True,
                     type=bool, help='Use cuda to train model')
-parser.add_argument('--ngpu', default=2, type=int, help='gpus')
+parser.add_argument('--ngpu', default=1, type=int, help='gpus')
 parser.add_argument('--lr', '--learning-rate',
                     default=1e-3, type=float, help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
@@ -68,10 +68,10 @@ parser.add_argument('--log_iters', default=True,
 parser.add_argument('--save_folder', default='weights/',
                     help='Location to save checkpoint models')
 parser.add_argument('--date', default='1213')
-parser.add_argument('--save_frequency', default=10)
+parser.add_argument('--save_frequency', default=300)
 parser.add_argument('--retest', default=False, type=bool,
                     help='test cache results')
-parser.add_argument('--test_frequency', default=10)
+parser.add_argument('--test_frequency', default=300)
 parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False,
                     help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
@@ -189,7 +189,7 @@ else:
     resume_net_path = os.path.join(save_folder, args.version + '_' + args.dataset + '_epoches_' + \
                                    str(args.resume_epoch) + '.pth')
 
-    resume_net_path = "/home/takumi/important_result/RFB_SSD/1000_Final_RFB_vgg_COCO.pth"
+    resume_net_path = "/home/takumi/important_result/RFB_SSD_sub/300Final_RFB_vgg_COCO.pth"
 
     print('Loading resume network', resume_net_path)
     state_dict = torch.load(resume_net_path)
@@ -346,7 +346,7 @@ def train():
     plt.ylim(0, 25)  ## y軸範囲固定（必須ではない）
     plt.grid()
 
-    #epoch_size = len(pseudo_dataset) // args.batch_size
+    epoch_size = len(pseudo_dataset) // args.batch_size
 
     for iteration in range(start_iter, max_iter + 10):
         if iteration > 0 and iteration % 1000 == 0:
@@ -361,9 +361,9 @@ def train():
             batch_iterator = iter(data.DataLoader(train_dataset, batch_size,
                                                   shuffle=True, num_workers=args.num_workers,
                                                   collate_fn=detection_collate))
-            #pseudo_iterator = iter(data.DataLoader(pseudo_dataset, batch_size,
-            #                                      shuffle=True, num_workers=args.num_workers,
-            #                                      collate_fn=detection_collate))
+            pseudo_iterator = iter(data.DataLoader(pseudo_dataset, batch_size,
+                                                  shuffle=True, num_workers=args.num_workers,
+                                                  collate_fn=detection_collate))
             loc_loss = 0
             conf_loss = 0
             if epoch % args.save_frequency == 0 and epoch > 0:
@@ -402,7 +402,8 @@ def train():
         lr = adjust_learning_rate(optimizer, args.gamma, epoch, step_index, iteration, epoch_size)
 
         # load train data
-        images, targets = next(batch_iterator)
+
+        images, targets = next(pseudo_iterator)
 
 
         # print(np.sum([torch.sum(anno[:,-1] == 2) for anno in targets]))
@@ -414,17 +415,20 @@ def train():
             images = Variable(images)
             targets = [Variable(anno, volatile=True) for anno in targets]
         # forward
+        #print(targets)
         out = net(images)
         # backprop
         optimizer.zero_grad()
         # arm branch loss
         loss_l, loss_c = criterion(out, priors, targets)
         # odm branch loss
+        if torch.isnan(loss_l) == 1:
+            exit()
 
         mean_loss_c += loss_c
         mean_loss_l += loss_l
 
-        loss = loss_l + loss_c
+        loss = loss_c
         loss.backward()
         optimizer.step()
         load_t1 = time.time()
@@ -441,7 +445,7 @@ def train():
             plt.pause(0.001)
             loss_all=[closs_list, lloss_list, loss_list, itra_list]
 
-        if iteration % 10 == 0:
+        if iteration % 1 == 0:
             print('Epoch:' + repr(epoch) + ' || epochiter: ' + repr(iteration % epoch_size) + '/' + repr(epoch_size)
                   + '|| Totel iter ' +
                   repr(iteration) + ' || L: %.4f C: %.4f||' % (
@@ -630,10 +634,16 @@ if __name__ == '__main__':
     if args.dataset != "youtube":
         if args.pseudo:
             pseudo_dataset = Pseudoframes(preproc=preproc(img_dim, rgb_means, rgb_std, p))
+
+            print(len(pseudo_dataset))
         train()
     else:
-        for i in range(200, 50000):
-            for class_num in range(1,24):
+        interval = 6
+        for i in range(50000):
+            for class_num in range(1, 24):
+                if not (class_num in [2, 4, 11, 16, 23]):
+                    continue
+
                 if class_num == 22:
                     continue
                 path1 = "/home/takumi/data/YouTube-BB"
@@ -644,11 +654,11 @@ if __name__ == '__main__':
                     video = video_list[i]
 
                     path_video = "/videos/{0}/".format(class_num) + video
-                    path_result = "/detection_result/{0}/".format(class_num) + video[:-4]
+                    path_result = "/detection_result_sub/{0}/".format(class_num) + video[:-4]
 
                     print(i, class_num)
 
-                    testset = Videoframes(path1 + path_video)
+                    testset = Videoframes(path1 + path_video, interval=interval)
                     train()
 
 

@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 
 class Videoframes(data.Dataset):
-    def __init__(self, video_path, transform=None):
+    def __init__(self, video_path, interval=1, transform=None):
         self.transform = transform
         self.video_path = video_path
 
@@ -30,8 +30,9 @@ class Videoframes(data.Dataset):
             while True:
                 ret, frame = cap.read()
                 if ret:
-                    self.video_frames.append(frame)
                     n += 1
+                    if n % interval == 0:
+                        self.video_frames.append(frame)
                 else:
                     break
 

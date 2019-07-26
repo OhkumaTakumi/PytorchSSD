@@ -90,7 +90,7 @@ class COCODetection(data.Dataset):
             if self.classes == "youtube_bb":
                 self._class_to_coco_cat_id = dict(zip([c['name'] for c in cats],
                                                       _COCO.getCatIds(catNms=classes_youtubebb)))
-            if self.classes == "youtube_bb_sub":
+            elif self.classes == "youtube_bb_sub":
                 self._class_to_coco_cat_id = dict(zip([c['name'] for c in cats],
                                                       _COCO.getCatIds(catNms=classes_youtubebb_sub)))
             else:
@@ -167,6 +167,10 @@ class COCODetection(data.Dataset):
             for cat in catIds:
                 box_cat_num[cat] = 0
 
+            for i in classes_youtubebb:
+                print(i,  _COCO.getCatIds(catNms=i))
+            print(catIds)
+
 
             self.indexes_limit = []
 
@@ -227,12 +231,15 @@ class COCODetection(data.Dataset):
         coco_cat_id_to_class_ind = dict([(self._class_to_coco_cat_id[cls],
                                           self._class_to_ind[cls])
                                          for cls in self._classes[1:]])
-        print(coco_cat_id_to_class_ind)
+
 
         for ix, obj in enumerate(objs):
             cls = coco_cat_id_to_class_ind[obj['category_id']]
             res[ix, 0:4] = obj['clean_bbox']
             res[ix, 4] = cls
+
+
+
 
         return res
 
@@ -241,6 +248,8 @@ class COCODetection(data.Dataset):
         target = self.annotations[index]
         img = cv2.imread(img_id, cv2.IMREAD_COLOR)
         height, width, _ = img.shape
+
+
 
 
         if self.target_transform is not None:
@@ -252,7 +261,13 @@ class COCODetection(data.Dataset):
             # target = self.target_transform(target, width, height)
         # print(target.shape)
 
-        return img, target
+        #print(1, type(target), target[0:1])
+        #print(img)
+
+        img2 = img
+        img2 = img2.numpy()
+
+        return img, target, index
 
     def __len__(self):
         return len(self.ids)

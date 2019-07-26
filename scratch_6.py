@@ -4,9 +4,11 @@ from Videoframe import Videoframes
 import matplotlib.pyplot as plt
 
 path1 = "/home/takumi/data/YouTube-BB"
-path_result = "/detection_result/1/_1zmnFlrUwc+1+0"
+path_result = "/detection_result_sub/1/_1zmnFlrUwc+1+0"
 class_list = ('__background__', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'bird', 'cat', 'dog', 'horse', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'umbrella', 'skateboard', 'knife', 'potted plant', 'toilet')
 True_list = (0,9,1,8,5,15,13,10,17,21,12,3,20,4,19,6,7,16,22,11,14,18,0,2)
+class_list_sub = ('__background__', 'bicycle', 'car', 'motorcycle', 'bus', 'truck')
+True_list_sub = (0, 0, 1, 0, 4, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 2)
 
 def hyouzi(class_num,path1, path_result):
 
@@ -39,8 +41,10 @@ def hyouzi(class_num,path1, path_result):
 
     a = sorted(range(len(max_list)), key = lambda k: max_list[k])
 
-    print(class_list[a[-1]], max_list[a[-1]], class_list[True_list[class_num]], max_list[True_list[class_num]])
-    if a[-1] != True_list[class_num]:
+    print(a[-1], class_num)
+
+    print(class_list_sub[a[-1]], max_list[a[-1]], class_list_sub[True_list_sub[class_num]], max_list[True_list_sub[class_num]])
+    if a[-1] != True_list_sub[class_num]:
         img = testset[max_index[a[-1]]]
         plt.imshow(img)
         plt.show()
@@ -48,8 +52,8 @@ def hyouzi(class_num,path1, path_result):
 
 
 for class_num in range(1, 24):
-    for i in range(50):
-        if class_num != 23:
+    for i in range(100):
+        if not class_num in [2,4,11,16,23]:
             continue
         path1 = "/home/takumi/data/YouTube-BB"
         path_classfolder = "/home/takumi/data/YouTube-BB/videos/{0}".format(class_num)
@@ -59,8 +63,8 @@ for class_num in range(1, 24):
             video = video_list[i]
 
             path_video = "/videos/{0}/".format(class_num) + video
-            path_result = "/detection_result/{0}/".format(class_num) + video[:-4]
-            testset = Videoframes(path1 + path_video)
+            path_result = "/detection_result_sub/{0}/".format(class_num) + video[:-4]
+            testset = Videoframes(path1 + path_video, interval=6)
             hyouzi(class_num,path1, path_result)
 
 

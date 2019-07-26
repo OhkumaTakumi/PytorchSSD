@@ -186,12 +186,16 @@ class RFBNet(nn.Module):
         for k in range(23):
             x = self.base[k](x)
 
+        x2 = x.cpu().detach().numpy()
+        #print(sum(x2))
+
         s = self.Norm(x)
         sources.append(s)
 
         # apply vgg up to fc7
         for k in range(23, len(self.base)):
             x = self.base[k](x)
+
 
         # apply extra layers and cache source layer outputs
         for k, v in enumerate(self.extras):
